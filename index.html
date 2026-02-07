@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>转运标签生成器</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        body { 
+            font-family: 'Helvetica', Arial, sans-serif; 
+            font-weight: bold;
+            background-color: #f4f7f9; 
+            margin: 0; 
+            padding: 2em;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 2em;
+        }
+        .main-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 2em;
+        }
+        .form-panel, .preview-panel {
+            background: #fff;
+            padding: 2em;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .form-panel {
+            min-width: 350px;
+        }
+        h1, h2 {
+            text-align: center;
+            margin-top: 0;
+        }
+        h1 { color: #1a237e; }
+        h2 { color: #555; font-size: 1.2em; }
+        .form-group {
+            margin-bottom: 1.5em;
+        }
+        label {
+            display: block;
+            font-weight: bold;
+            margin-bottom: 0.5em;
+            color: #555;
+        }
+        input, button, label {
+            font-family: 'Helvetica', Arial, sans-serif;
+            font-weight: bold;
+        }
+        .combobox-input, input[type="date"], input[type="number"] {
+            width: 100%;
+            padding: 0.8em;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 1em;
+            box-sizing: border-box;
+            background-color: white;
+        }
+        input:focus, .combobox-input:focus {
+            outline: none;
+            border-color: #1a237e;
+        }
+        .combobox-container {
+            position: relative;
+        }
+        .combobox-input {
+            padding-right: 2.5em;
+        }
+        .combobox-arrow {
+            position: absolute;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: 2.5em;
+            pointer-events: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .combobox-arrow::after {
+            content: '';
+            width: 0;
+            height: 0;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-top: 6px solid #555;
+        }
+        .combobox-options {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid #ccc;
+            border-top: none;
+            border-radius: 0 0 4px 4px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+        }
+        .combobox-options .option { padding: 0.8em; cursor: pointer; }
+        .combobox-options .option:hover { background-color: #f0f0f0; }
+        .button-group {
+            display: flex;
+            flex-direction: column;
+            gap: 1em;
+            margin-top: 1em;
+        }
+        button {
+            background-color: #1a237e;
+            color: white;
+            border: none;
+            padding: 1em;
+            font-size: 1em;
+            font-weight: bold;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover { background-color: #3f51b5; }
+        button:disabled { background-color: #9fa8da; cursor: not-allowed; }
+        .canvas-container {
+            background: #f0f0f0;
+            padding: 1em;
+            border-radius: 4px;
+            margin-bottom: 2em;
+        }
+        canvas { display: block; background: #fff; }
+        #pdf-preview-container { border: 1px solid #ccc; border-radius: 4px; }
+        #pdf-preview { display: block; width: 100%; height: 500px; border: none; }
+    </style>
+</head>
+<body>
+
+<div class="main-container">
+    <div class="form-panel">
+        <h1>标签信息</h1>
+        <div class="form-group">
+            <label for="origin-station">始发站 (Origin)</label>
+            <div class="combobox-container" id="origin-container">
+                <input type="text" class="combobox-input" id="origin-station" placeholder="输入或选择站点">
+                <div class="combobox-arrow"></div>
+                <div class="combobox-options"></div>
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="dest-station">接收站 (Destination)</label>
+            <div class="combobox-container" id="dest-container">
+                <input type="text" class="combobox-input" id="dest-station" placeholder="输入或选择站点">
+                <div class="combobox-arrow"></div>
+                <div class="combobox-options"></div>
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="ship-date">发货日期 (Ship Date)</label>
+            <input type="date" id="ship-date" required>
+        </div>
+        <div class="form-group">
+            <label for="quantity">生成数量 (Quantity)</label>
+            <input type="number" id="quantity" min="1" value="1">
+        </div>
+        
+        <div class="button-group">
+            <button id="generate-btn">生成 PDF</button>
+            </div>
+    </div>
+
+    <div class="preview-panel">
+        <h2>实时预览</h2>
+        <div class="canvas-container">
+            <canvas id="label-preview" width="600" height="400" style="width: 375px; height: 250px;"></canvas>
+        </div>
+        <div id="pdf-section" style="display: none;">
+            <h2>PDF 预览</h2>
+            <div id="pdf-preview-container">
+                <iframe id="pdf-preview"></iframe>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const stations = ["ATL", "DEN", "DFW", "EWR", "JFK", "LAX/Fontana", "LAX/Chino", "MIA", "ORD", "SEA", "SJC", "ABQ330", "ALB100", "ALB066", "ASH040", "ATL495", "ATL64", "ABE297", "AUG171", "AUS205", "AVP110", "BFM059", "BHM441", "BIL149", "BMH173", "BNA900", "BNA211", "BOI146", "BOS022", "BUF254", "CAE131", "CHS130", "CLE784", "CLT133", "CMH255", "CMH778", "CTG221", "CVG505", "DCA522", "DCA521", "DOV300", "DTW450", "ELP696", "EUG285", "EWR936", "FTM841", "GEG442", "GLB163", "GNV395", "GSO215", "GSP121", "HFD006", "HFD712", "HNL935", "HUS321", "IAH125", "IAH138", "IND650", "JAX797", "LAS300", "LAX709", "LAX713", "LAX232", "LAX946", "LAX164", "LAX112", "LAX144", "LAX100", "LAX489", "LIT114", "LRD111", "MCI490", "MCO456", "MDT185", "MED950", "MEM444", "MEM868", "MFE517", "MHT157", "MKE992", "MML247", "OKC100", "OMA113", "ORD102", "ORD262", "ORD184", "ORF271", "PDX199", "PHL625", "PHX120", "PIT017", "PWM240", "PVD031", "PVD170", "RDU550", "RIC100", "RNO131", "SAN975", "SAT493", "SAV251", "SDF115", "SEA950", "SJC425", "SJC193", "SJC341", "SJC208", "SLC260", "SMF150", "STG120", "STL812", "SWF392", "SYR460", "TLH796", "TLM220", "TOL255", "TPA710", "TUL135", "TYS102", "EUG160", "YKM510", "WPB392"];
+
+let currentPdfUrl = null;
+
+// --- 自定义下拉框初始化逻辑 ---
+function initializeCombobox(containerId) {
+    const container = document.getElementById(containerId);
+    const input = container.querySelector('.combobox-input');
+    const optionsContainer = container.querySelector('.combobox-options');
+
+    let optionsHTML = '';
+    stations.forEach(station => {
+        optionsHTML += `<div class="option" data-value="${station}">${station}</div>`;
+    });
+    optionsContainer.innerHTML = optionsHTML;
+
+    input.addEventListener('click', (e) => {
+        const isVisible = optionsContainer.style.display === 'block';
+        document.querySelectorAll('.combobox-options').forEach(el => el.style.display = 'none');
+        optionsContainer.style.display = isVisible ? 'none' : 'block';
+        e.stopPropagation();
+    });
+
+    input.addEventListener('input', () => {
+        const filter = input.value.toUpperCase();
+        optionsContainer.style.display = 'block';
+        const options = optionsContainer.querySelectorAll('.option');
+        options.forEach(option => {
+            const value = option.getAttribute('data-value');
+            if (value.toUpperCase().indexOf(filter) > -1) {
+                option.style.display = '';
+            } else {
+                option.style.display = 'none';
+            }
+        });
+        updatePreview();
+    });
+
+    optionsContainer.addEventListener('click', (e) => {
+        if (e.target.classList.contains('option')) {
+            input.value = e.target.getAttribute('data-value');
+            optionsContainer.style.display = 'none';
+            updatePreview();
+        }
+    });
+}
+
+initializeCombobox('origin-container');
+initializeCombobox('dest-container');
+
+document.addEventListener('click', () => {
+    document.querySelectorAll('.combobox-options').forEach(el => el.style.display = 'none');
+});
+
+
+// --- 核心绘图逻辑 (Canvas) ---
+function drawLabelOnCanvas(canvas, data) {
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width;
+    const H = canvas.height;
+    const PADDING = 20;
+    const FONT_FAMILY = 'Helvetica, Arial, sans-serif';
+
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'black';
+
+    const topAreaHeight = H * 0.75;
+    const originText = `${data.origin} >`;
+    const destText = `> ${data.dest}`;
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    let originFontSize = 300;
+    ctx.font = `bold ${originFontSize}px ${FONT_FAMILY}`;
+    while ((ctx.measureText(originText).width > W - PADDING * 2 || originFontSize * 1.2 > topAreaHeight / 2) && originFontSize > 20) {
+        originFontSize -= 5;
+        ctx.font = `bold ${originFontSize}px ${FONT_FAMILY}`;
+    }
+    ctx.fillText(originText, PADDING, PADDING);
+    
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    let destFontSize = 300;
+    ctx.font = `bold ${destFontSize}px ${FONT_FAMILY}`;
+    while ((ctx.measureText(destText).width > W - PADDING * 2 || destFontSize * 1.2 > topAreaHeight / 2) && destFontSize > 20) {
+        destFontSize -= 5;
+        ctx.font = `bold ${destFontSize}px ${FONT_FAMILY}`;
+    }
+    ctx.fillText(destText, W - PADDING, topAreaHeight - PADDING);
+
+    const lineY = topAreaHeight;
+    ctx.fillRect(0, lineY, W, 5);
+
+    const dateAreaHeight = H * 0.25;
+    const dateCenterY = lineY + (dateAreaHeight / 2);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `bold 40px ${FONT_FAMILY}`;
+    ctx.fillText(data.shipdate, W / 2, dateCenterY);
+}
+
+// --- 实时更新预览 ---
+function updatePreview() {
+    const data = getFormData(true); 
+    if(!data) return;
+    const canvas = document.getElementById('label-preview');
+    drawLabelOnCanvas(canvas, data);
+}
+
+// --- 获取表单数据通用函数 ---
+function getFormData(includeTime = true) {
+    const origin = document.getElementById('origin-station').value.toUpperCase();
+    const dest = document.getElementById('dest-station').value.toUpperCase();
+    const shipDateRaw = document.getElementById('ship-date').value;
+    const total = parseInt(document.getElementById('quantity').value, 10) || 1;
+
+    if (!origin || !dest || !shipDateRaw) {
+        return null;
+    }
+    const dateParts = shipDateRaw.split('-');
+    
+    let shipdate;
+    const year = dateParts[0];
+    const month = parseInt(dateParts[1], 10);
+    const day = parseInt(dateParts[2], 10);
+    const dateString = `${year}/${month}/${day}`;
+
+    if (includeTime) {
+        const now = new Date();
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        shipdate = `${dateString} ${hours}:${minutes}`;
+    } else {
+        shipdate = dateString;
+    }
+
+    return { origin, dest, shipdate, total };
+}
+
+// --- 主操作：生成PDF并显示在预览框中 ---
+async function generatePDF() {
+    const generateBtn = document.getElementById('generate-btn');
+    generateBtn.disabled = true;
+    generateBtn.textContent = '生成中...';
+
+    try {
+        await new Promise(resolve => setTimeout(resolve, 50));
+    
+        const data = getFormData(true);
+        if (!data) {
+            alert('请填写所有必填项！');
+            return;
+        }
+
+        const { jsPDF } = window.jspdf;
+        const pdf = new jsPDF({ orientation: "landscape", unit: "in", format: [6, 4] });
+        const originText = `${data.origin} >`;
+        const destText = `> ${data.dest}`;
+
+        for (let i = 1; i <= data.total; i++) {
+            if (i > 1) pdf.addPage();
+            
+            const W = 6;
+            const H = 4;
+            const MARGIN = 0.2;
+
+            pdf.setFont('Helvetica', 'bold');
+            
+            const topAreaHeight = H * 0.75;
+
+            let originFontSize = 250;
+            pdf.setFontSize(originFontSize);
+            while ((pdf.getTextWidth(originText) > W - MARGIN * 2 || originFontSize * 1.2 / 72 > topAreaHeight / 2 - MARGIN) && originFontSize > 20) {
+                originFontSize -= 5;
+                pdf.setFontSize(originFontSize);
+            }
+            pdf.text(originText, MARGIN, MARGIN, { align: 'left', baseline: 'top' });
+
+            let destFontSize = 250;
+            pdf.setFontSize(destFontSize);
+            while ((pdf.getTextWidth(destText) > W - MARGIN * 2 || destFontSize * 1.2 / 72 > topAreaHeight / 2 - MARGIN) && destFontSize > 20) {
+                destFontSize -= 5;
+                pdf.setFontSize(destFontSize);
+            }
+            pdf.text(destText, W - MARGIN, topAreaHeight - MARGIN, { align: 'right', baseline: 'bottom' });
+
+            const lineY = topAreaHeight;
+            pdf.setDrawColor(0);
+            pdf.setLineWidth(0.05);
+            pdf.line(0, lineY, W, lineY);
+            
+            const dateAreaHeight = H * 0.25;
+            const dateCenterY = lineY + (dateAreaHeight / 2);
+            pdf.setFontSize(32);
+            pdf.text(data.shipdate, W / 2, dateCenterY, { align: 'center', baseline: 'middle' });
+        }
+        
+        if (currentPdfUrl) {
+            URL.revokeObjectURL(currentPdfUrl);
+        }
+        const pdfBlob = pdf.output('blob');
+        currentPdfUrl = URL.createObjectURL(pdfBlob);
+
+        document.getElementById('pdf-preview').src = currentPdfUrl;
+        document.getElementById('pdf-section').style.display = 'block';
+        // **调整**: 不再显示打印按钮
+        // document.getElementById('print-btn').style.display = 'block'; 
+    } catch (error) {
+        console.error("PDF生成失败:", error);
+        alert("抱歉，PDF生成时遇到错误，请重试或检查浏览器控制台。");
+    } finally {
+        generateBtn.disabled = false;
+        generateBtn.textContent = '重新生成 PDF';
+    }
+}
+
+// **调整**: 打印函数已无用，可以移除
+/*
+function printPDF() {
+    const pdfIframe = document.getElementById('pdf-preview');
+    if (!pdfIframe.src) {
+        alert('没有可以打印的PDF，请先生成。');
+        return;
+    }
+    try {
+        pdfIframe.contentWindow.print();
+    } catch (e) {
+        alert('无法直接打印，请在PDF预览区域右键选择打印。');
+        console.error("打印失败: ", e);
+    }
+}
+*/
+
+// --- 页面初始化 ---
+document.querySelectorAll("input[type=date], input[type=number]").forEach(el => el.addEventListener('input', updatePreview));
+document.getElementById('generate-btn').addEventListener('click', generatePDF);
+
+document.getElementById('origin-station').value = 'EWR';
+document.getElementById('dest-station').value = 'SJC';
+document.getElementById('ship-date').value = '2025-09-26';
+updatePreview();
+
+</script>
+</body>
+</html>
